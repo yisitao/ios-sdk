@@ -4,9 +4,10 @@
 #import <CoreTelephony/CTCarrier.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <sys/utsname.h>
+
 #import "TDKeychainItemWrapper.h"
 
-#define VERSION @"2.1.0"
+#define VERSION @"2.1.1"
 
 @interface TDDeviceInfo ()
 
@@ -37,21 +38,30 @@
     return self;
 }
 
-- (NSString *)getlibVersion {
+- (NSString *)libVersion {
     return VERSION;
 }
 
--(NSDictionary *)collectAutomaticProperties {
+- (NSDictionary *)collectAutomaticProperties {
     NSMutableDictionary *p = [NSMutableDictionary dictionary];
     UIDevice *device = [UIDevice currentDevice];
     [p setValue:_deviceId forKey:@"#device_id"];
     _telephonyInfo = [[CTTelephonyNetworkInfo alloc] init];
-    CTCarrier *carrier = [_telephonyInfo subscriberCellularProvider];
+    CTCarrier *carrier = nil;
+
+    if (@available(iOS 12.1, *)) {
+        carrier = _telephonyInfo.serviceSubscriberCellularProviders.allValues.firstObject; 
+    }
+    
+    if (!carrier) {
+        carrier = [_telephonyInfo subscriberCellularProvider];
+    }
+
     [p setValue:carrier.carrierName forKey:@"#carrier"];
     CGSize size = [UIScreen mainScreen].bounds.size;
     [p addEntriesFromDictionary:@{
                                   @"#lib": @"iOS",
-                                  @"#lib_version": [self getlibVersion],
+                                  @"#lib_version": [self libVersion],
                                   @"#manufacturer": @"Apple",
                                   @"#device_model": [self iphoneType],
                                   @"#os": [device systemName],
