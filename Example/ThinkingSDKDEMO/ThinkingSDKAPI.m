@@ -20,7 +20,7 @@
 }
 
 + (void)testTrackWithTime {
-    [[ThinkingAnalyticsSDK sharedInstance] track:@"key1" properties:@{@"properKey1":@"properValue1"} time:[NSDate date]];
+    [[ThinkingAnalyticsSDK sharedInstance] track:@"key1" properties:@{@"properKey1":@"properValue1"} time:[NSDate date] timeZone:[NSTimeZone localTimeZone]];
 }
 
 + (void)testUserSet {
@@ -28,6 +28,10 @@
                                                      @"UserName":@"TA1",
                                                      @"Age":[NSNumber numberWithInt:20]
                                                      }];
+}
+
++ (void)testUserUnset {
+    [[ThinkingAnalyticsSDK sharedInstance] user_unset:@"key1"];
 }
 
 + (void)testUserSetonce {
