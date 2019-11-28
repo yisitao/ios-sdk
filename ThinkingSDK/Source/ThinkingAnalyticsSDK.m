@@ -10,6 +10,14 @@
 #import "TDSqliteDataQueue.h"
 #import "TDAutoTrackManager.h"
 
+#if !defined(THINKING_UIWEBVIEW_SUPPORT)
+    #define THINKING_UIWEBVIEW_SUPPORT 0
+#endif
+
+#if !THINKING_UIWEBVIEW_SUPPORT
+#import <WebKit/WebKit.h>
+#endif
+
 #if !__has_feature(objc_arc)
 #error The ThinkingSDK library must be compiled with ARC enabled
 #endif
@@ -42,6 +50,10 @@ static NSString * const TA_JS_TRACK_SCHEME = @"thinkinganalytics://trackEvent";
 @property (nonatomic, strong) NSDateFormatter *timeFormatter;
 @property (nonatomic, assign) BOOL applicationWillResignActive;
 @property (nonatomic, assign) BOOL appRelaunched;
+
+#if !THINKING_UIWEBVIEW_SUPPORT
+@property (nonatomic, strong) WKWebView *wkWebView;
+#endif
 
 @end
 
@@ -553,23 +565,23 @@ static dispatch_queue_t networkQueue;
     dispatch_group_enter(bgGroup);
     dispatch_async(serialQueue, ^{
         NSNumber *currentSystemUpTime = @([[NSDate date] timeIntervalSince1970]);
-        NSArray *keys = [self.trackTimer allKeys];
-        for (NSString *key in keys) {
-            if ([key isEqualToString:TD_APP_END_EVENT]) {
-                continue;
-            }
-            NSMutableDictionary *eventTimer = [[NSMutableDictionary alloc] initWithDictionary:self.trackTimer[key]];
-            if (eventTimer) {
-                NSNumber *eventBegin = [eventTimer valueForKey:TD_EVENT_START];
-                NSNumber *eventDuration = [eventTimer valueForKey:TD_EVENT_DURATION];
-                double usedTime;
-                if (eventDuration) {
-                    usedTime = [currentSystemUpTime doubleValue] - [eventBegin doubleValue] + [eventDuration doubleValue];
-                } else {
-                    usedTime = [currentSystemUpTime doubleValue] - [eventBegin doubleValue];
+        @synchronized (self.trackTimer) {
+            NSArray *keys = [self.trackTimer allKeys];
+            for (NSString *key in keys) {
+                if ([key isEqualToString:TD_APP_END_EVENT]) {
+                    continue;
                 }
-                [eventTimer setObject:[NSNumber numberWithDouble:usedTime] forKey:TD_EVENT_DURATION];
-                @synchronized (self.trackTimer) {
+                NSMutableDictionary *eventTimer = [[NSMutableDictionary alloc] initWithDictionary:self.trackTimer[key]];
+                if (eventTimer) {
+                    NSNumber *eventBegin = [eventTimer valueForKey:TD_EVENT_START];
+                    NSNumber *eventDuration = [eventTimer valueForKey:TD_EVENT_DURATION];
+                    double usedTime;
+                    if (eventDuration) {
+                        usedTime = [currentSystemUpTime doubleValue] - [eventBegin doubleValue] + [eventDuration doubleValue];
+                    } else {
+                        usedTime = [currentSystemUpTime doubleValue] - [eventBegin doubleValue];
+                    }
+                    [eventTimer setObject:[NSNumber numberWithDouble:usedTime] forKey:TD_EVENT_DURATION];
                     self.trackTimer[key] = eventTimer;
                 }
             }
@@ -613,12 +625,12 @@ static dispatch_queue_t networkQueue;
     
     dispatch_async(serialQueue, ^{
         NSNumber *currentTime = @([[NSDate date] timeIntervalSince1970]);
-        NSArray *keys = [self.trackTimer allKeys];
-        for (NSString *key in keys) {
-            NSMutableDictionary *eventTimer = [[NSMutableDictionary alloc] initWithDictionary:self.trackTimer[key]];
-            if (eventTimer) {
-                [eventTimer setValue:currentTime forKey:TD_EVENT_START];
-                @synchronized (self.trackTimer) {
+        @synchronized (self.trackTimer) {
+            NSArray *keys = [self.trackTimer allKeys];
+            for (NSString *key in keys) {
+                NSMutableDictionary *eventTimer = [[NSMutableDictionary alloc] initWithDictionary:self.trackTimer[key]];
+                if (eventTimer) {
+                    [eventTimer setValue:currentTime forKey:TD_EVENT_START];
                     self.trackTimer[key] = eventTimer;
                 }
             }
@@ -1181,12 +1193,14 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         }
     }
     
-    NSDictionary *eventTimer = self.trackTimer[eventData.eventName];
-    if (eventTimer) {
-        @synchronized (self.trackTimer) {
+    NSDictionary *eventTimer;
+    @synchronized (self.trackTimer) {
+        eventTimer = self.trackTimer[eventData.eventName];
+        if (eventTimer) {
             [self.trackTimer removeObjectForKey:eventData.eventName];
         }
-        
+    }
+    if (eventTimer) {
         NSNumber *eventBegin = [eventTimer valueForKey:TD_EVENT_START];
         NSNumber *eventDuration = [eventTimer valueForKey:TD_EVENT_DURATION];
         
@@ -1482,43 +1496,57 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         return YES;
     
     NSString *queryValue = [queryItem lastObject];
-    Class wkWebViewClass = NSClassFromString(@"WKWebView");
     if ([urlStr rangeOfString:TA_JS_TRACK_SCHEME].length > 0) {
         if ([self hasDisabled])
             return YES;
         
-        if ([webView isKindOfClass:[UIWebView class]] || (wkWebViewClass && [webView isKindOfClass:wkWebViewClass])) {
-            NSString *eventData = [queryValue stringByRemovingPercentEncoding];
-            if (eventData.length > 0)
-                [self clickFromH5:eventData];
-        }
+        NSString *eventData = [queryValue stringByRemovingPercentEncoding];
+        if (eventData.length > 0)
+            [self clickFromH5:eventData];
     }
     return YES;
 }
 
-- (NSString *)getUserAgent {
-    __block NSString *currentUA;
-    if (currentUA  == nil)  {
-        td_dispatch_main_sync_safe(^{
-            UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
-            currentUA = [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
-        });
-    }
-    return currentUA;
+
+#if THINKING_UIWEBVIEW_SUPPORT
+- (NSString *)webViewGetUserAgent {
+    UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
+    return [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
 }
+#else
+- (void)wkWebViewGetUserAgent: (void (^)(NSString *))completion {
+    self.wkWebView = [[WKWebView alloc] initWithFrame:CGRectZero];
+    [self.wkWebView evaluateJavaScript:@"navigator.userAgent" completionHandler:^(id __nullable userAgent, NSError * __nullable error) {
+        completion(userAgent);
+    }];
+}
+#endif
 
 - (void)addWebViewUserAgent {
     if ([self hasDisabled])
         return;
         
-    NSString *userAgent = [self getUserAgent];
-    if ([userAgent rangeOfString:@"td-sdk-ios"].location == NSNotFound) {
-        userAgent = [userAgent stringByAppendingString:@" /td-sdk-ios"];
-    }
+    void (^setUserAgent)(NSString *userAgent) = ^void (NSString *userAgent) {
+        if ([userAgent rangeOfString:@"td-sdk-ios"].location == NSNotFound) {
+            userAgent = [userAgent stringByAppendingString:@" /td-sdk-ios"];
+            
+            NSDictionary *userAgentDic = [[NSDictionary alloc] initWithObjectsAndKeys:userAgent, @"UserAgent", nil];
+            [[NSUserDefaults standardUserDefaults] registerDefaults:userAgentDic];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+        }
+    };
     
-    NSDictionary *dictionnary = [[NSDictionary alloc] initWithObjectsAndKeys:userAgent, @"UserAgent", nil];
-    [[NSUserDefaults standardUserDefaults] registerDefaults:dictionnary];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    dispatch_block_t getUABlock = ^(){
+        #if THINKING_UIWEBVIEW_SUPPORT
+        setUserAgent([self webViewGetUserAgent]);
+        #else
+        [self wkWebViewGetUserAgent:^(NSString *userAgent) {
+            setUserAgent(userAgent);
+        }];
+        #endif
+    };
+    
+    td_dispatch_main_sync_safe(getUABlock);
 }
 
 #pragma mark - Logging
