@@ -22,12 +22,16 @@
     self.window.rootViewController = [self createRootViewController];
     [self.window makeKeyAndVisible];
     
+    // 开启Log
+    [ThinkingAnalyticsSDK setLogLevel:TDLoggingLevelDebug];
     // 初始化
     [ThinkingAnalyticsSDK startWithAppId:@"YOUR_APPID" withUrl:@"YOUR_SERVER_URL"];
     
-    // 配置后台自启事件的初始化方法
+    // 配置初始化方法
 //    TDConfig *config = [[TDConfig alloc] init];
 //    config.trackRelaunchedInBackgroundEvents = YES;
+//    config.debugMode = ThinkingAnalyticsDebugOnly;
+//    config.debugMode = ThinkingAnalyticsDebug;
 //    [ThinkingAnalyticsSDK startWithAppId:@"APP" withUrl:@"https://sdk.tga.thinkinggame.cn:9443" withConfig:config];
     
     // 自动埋点
@@ -39,9 +43,6 @@
 //     ThinkingAnalyticsEventTypeAppInstall //|
 ////     ThinkingAnalyticsEventTypeAppViewCrash
 //     ];
-    
-    // 开启Log
-    [ThinkingAnalyticsSDK setLogLevel:TDLoggingLevelDebug];
     
     // H5 需要打通时  需要配置
     [[ThinkingAnalyticsSDK sharedInstance] addWebViewUserAgent];

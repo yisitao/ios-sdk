@@ -1,60 +1,15 @@
 #import "ThinkingAnalyticsSDKPrivate.h"
 
-#import <objc/runtime.h>
-
-#import "TDLogging.h"
-#import "ThinkingExceptionHandler.h"
-#import "TDNetwork.h"
-#import "TDDeviceInfo.h"
-#import "TDConfig.h"
-#import "TDSqliteDataQueue.h"
 #import "TDAutoTrackManager.h"
-
-#if !defined(THINKING_UIWEBVIEW_SUPPORT)
-    #define THINKING_UIWEBVIEW_SUPPORT 0
-#endif
-
-#if !THINKING_UIWEBVIEW_SUPPORT
-#import <WebKit/WebKit.h>
-#endif
 
 #if !__has_feature(objc_arc)
 #error The ThinkingSDK library must be compiled with ARC enabled
 #endif
 
-static NSUInteger const kBatchSize = 50;
-static NSUInteger const TA_PROPERTY_LENGTH_LIMIT = 2048;
-static NSUInteger const TA_PROPERTY_CRASH_LENGTH_LIMIT = 8191*2;
-static NSString * const TA_JS_TRACK_SCHEME = @"thinkinganalytics://trackEvent";
-
-@interface TDEventData : NSObject
-
-@property (nonatomic, copy) NSString *eventName;
-@property (nonatomic, copy) NSString *eventType;
-@property (nonatomic, copy) NSString *timeString;
-@property (nonatomic, assign) BOOL autotrack;
-@property (nonatomic, assign) BOOL persist;
-@property (nonatomic, assign) double zoneOffset;
-@property (nonatomic, assign) TimeValueType timeValueType;
-@property (nonatomic, strong) NSDictionary *properties;
-
-@end
-
 @interface ThinkingAnalyticsSDK ()
 
 @property (atomic, strong) TDNetwork *network;
-@property (atomic, strong) TDDeviceInfo *deviceInfo;
-@property (atomic, strong) TDSqliteDataQueue *dataQueue;
 @property (atomic, strong) TDAutoTrackManager *autoTrackManager;
-@property (nonatomic, copy) TDConfig *config;
-@property (nonatomic, strong) NSDateFormatter *timeFormatter;
-@property (nonatomic, assign) BOOL applicationWillResignActive;
-@property (nonatomic, assign) BOOL appRelaunched;
-@property (nonatomic, assign) BOOL isEnableSceneSupport;
-
-#if !THINKING_UIWEBVIEW_SUPPORT
-@property (nonatomic, strong) WKWebView *wkWebView;
-#endif
 
 @end
 
@@ -132,10 +87,12 @@ static dispatch_queue_t networkQueue;
     return networkQueue;
 }
 
-- (instancetype)initLight:(NSString *)appid {
+- (instancetype)initLight:(NSString *)appid withServerURL:(NSString *)serverURL withConfig:(TDConfig *)config {
     if (self = [self init]) {
         _appid = appid;
         _isEnabled = YES;
+        _config = [config copy];
+        self.deviceInfo = [TDDeviceInfo sharedManager];
         
         self.trackTimer = [NSMutableDictionary dictionary];
         _timeFormatter = [[NSDateFormatter alloc] init];
@@ -153,14 +110,24 @@ static dispatch_queue_t networkQueue;
             TDLogError(@"SqliteException: init SqliteDataQueue failed");
         }
         
-        self.deviceInfo = [TDDeviceInfo sharedManager];
+        self.debugEventsQueue = [NSMutableArray array];
+        
+        _network = [[TDNetwork alloc] init];
+        _network.debugMode = config.debugMode;
+        _network.appid = appid;
+        _network.sessionDidReceiveAuthenticationChallenge = config.securityPolicy.sessionDidReceiveAuthenticationChallenge;
+        if (config.debugMode == ThinkingAnalyticsDebugOnly || config.debugMode == ThinkingAnalyticsDebug) {
+            _network.serverDebugURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/data_debug", serverURL]];
+        }
+        _network.automaticData = _deviceInfo.automaticData;
+        _network.securityPolicy = config.securityPolicy;
     }
     return self;
 }
 
 - (instancetype)initWithAppkey:(NSString *)appid withServerURL:(NSString *)serverURL withConfig:(TDConfig *)config {
     if (self = [self init:appid]) {
-        self.serverURL = [NSString stringWithFormat:@"%@/sync",serverURL];
+        self.serverURL = serverURL;
         self.appid = appid;
         
         if (!config) {
@@ -170,6 +137,9 @@ static dispatch_queue_t networkQueue;
         _config = [config copy];
         _config.appid = appid;
         _config.configureURL = [NSString stringWithFormat:@"%@/config",serverURL];
+        
+        self.deviceInfo = [TDDeviceInfo sharedManager];
+        [self retrievePersistedData];
         [_config updateConfig];
         
         self.trackTimer = [NSMutableDictionary dictionary];
@@ -179,7 +149,6 @@ static dispatch_queue_t networkQueue;
         _timeFormatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
 
         _applicationWillResignActive = NO;
-        _firstEnterForeground = YES;
         _ignoredViewControllers = [[NSMutableSet alloc] init];
         _ignoredViewTypeList = [[NSMutableSet alloc] init];
         
@@ -199,13 +168,19 @@ static dispatch_queue_t networkQueue;
         [self setApplicationListeners];
         [self setNetRadioListeners];
         
-        self.deviceInfo = [TDDeviceInfo sharedManager];
         self.autoTrackManager = [TDAutoTrackManager sharedManager];
-        
-        [self retrievePersistedData];
-        
-        _network = [[TDNetwork alloc] initWithServerURL:[NSURL URLWithString:self.serverURL]];
+        self.debugEventsQueue = [NSMutableArray array];
+
+        _network = [[TDNetwork alloc] init];
+        _network.debugMode = config.debugMode;
+        _network.appid = appid;
+        _network.sessionDidReceiveAuthenticationChallenge = config.securityPolicy.sessionDidReceiveAuthenticationChallenge;
+        if (config.debugMode == ThinkingAnalyticsDebugOnly || config.debugMode == ThinkingAnalyticsDebug) {
+            _network.serverDebugURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/data_debug",serverURL]];
+        }
+        _network.serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/sync",serverURL]];
         _network.automaticData = _deviceInfo.automaticData;
+        _network.securityPolicy = config.securityPolicy;
         
         [self sceneSupportSetting];
         
@@ -222,6 +197,11 @@ static dispatch_queue_t networkQueue;
         }
         
         instances[appid] = self;
+        
+        if(instances.count == 1) {
+            TDLogInfo(@"Thank you very much for using Thinking Data SDK. We will do our best to provide you with the best service.");
+            TDLogInfo(@"Thinking Data SDK version:%@, DeviceId:%@", [TDDeviceInfo libVersion], [self getDeviceId]);
+        }
     }
     return self;
 }
@@ -236,7 +216,7 @@ static dispatch_queue_t networkQueue;
 }
 
 - (NSString *)description {
-    return [NSString stringWithFormat:@"<ThinkingAnalyticsSDK: %p - appid: %@ serverUrl:%@>", (void *)self, self.appid, self.serverURL];
+    return [NSString stringWithFormat:@"<ThinkingAnalyticsSDK: %p - appid: %@ serverUrl: %@>", (void *)self, self.appid, self.serverURL];
 }
 
 + (UIApplication *)sharedUIApplication {
@@ -307,9 +287,8 @@ static dispatch_queue_t networkQueue;
 
 #pragma mark - LightInstance
 - (ThinkingAnalyticsSDK *)createLightInstance {
-    ThinkingAnalyticsSDK *lightInstance = [[LightThinkingAnalyticsSDK alloc] initWithAPPID:self.appid];
+    ThinkingAnalyticsSDK *lightInstance = [[LightThinkingAnalyticsSDK alloc] initWithAPPID:self.appid withServerURL:self.serverURL withConfig:self.config];
     lightInstance.identifyId = self.deviceInfo.uniqueId;
-    lightInstance.config = [self.config copy];
     lightInstance.relaunchInBackGround = self.relaunchInBackGround;
     lightInstance.isEnableSceneSupport = self.isEnableSceneSupport;
     return lightInstance;
@@ -322,6 +301,8 @@ static dispatch_queue_t networkQueue;
     [self unarchiveIdentifyID];
     [self unarchiveEnabled];
     [self unarchiveOptOut];
+    [self unarchiveUploadSize];
+    [self unarchiveUploadInterval];
     
     if (self.identifyId.length == 0) {
         self.identifyId = self.deviceInfo.uniqueId;
@@ -348,6 +329,34 @@ static dispatch_queue_t networkQueue;
 
 - (void)unarchiveAccountID {
     self.accountId = (NSString *)[ThinkingAnalyticsSDK unarchiveFromFile:[self accountIDFilePath] asClass:[NSString class]];
+}
+
+- (void)archiveUploadSize:(NSNumber *)uploadSize {
+    NSString *filePath = [self uploadSizeFilePath];
+    if (![self archiveObject:uploadSize withFilePath:filePath]) {
+        TDLogError(@"%@ unable to archive uploadSize", self);
+    }
+}
+
+- (void)unarchiveUploadSize {
+    self.config.uploadSize = (NSNumber *)[ThinkingAnalyticsSDK unarchiveFromFile:[self uploadSizeFilePath] asClass:[NSNumber class]];
+    if (!self.config.uploadSize) {
+        self.config.uploadSize = [NSNumber numberWithInteger:100];
+    }
+}
+
+- (void)archiveUploadInterval:(NSNumber *)uploadInterval {
+    NSString *filePath = [self uploadIntervalFilePath];
+    if (![self archiveObject:uploadInterval withFilePath:filePath]) {
+        TDLogError(@"%@ unable to archive uploadInterval", self);
+    }
+}
+
+- (void)unarchiveUploadInterval {
+    self.config.uploadInterval = (NSNumber *)[ThinkingAnalyticsSDK unarchiveFromFile:[self uploadIntervalFilePath] asClass:[NSNumber class]];
+    if (!self.config.uploadInterval) {
+        self.config.uploadInterval = [NSNumber numberWithInteger:60];
+    }
 }
 
 - (void)archiveAccountID:(NSString *)accountID {
@@ -389,10 +398,11 @@ static dispatch_queue_t networkQueue;
 
 - (void)unarchiveEnabled {
     NSNumber *enabled = (NSNumber *)[ThinkingAnalyticsSDK unarchiveFromFile:[self enabledFilePath] asClass:[NSNumber class]];
-    if (enabled == nil)
+    if (enabled == nil) {
         self.isEnabled = YES;
-    else
+    } else {
         self.isEnabled = [enabled boolValue];
+    }
 }
 
 - (BOOL)archiveObject:(id)object withFilePath:(NSString *)filePath {
@@ -448,6 +458,14 @@ static dispatch_queue_t networkQueue;
 
 - (NSString *)accountIDFilePath {
     return [self persistenceFilePath:@"accountID"];
+}
+
+- (NSString *)uploadSizeFilePath {
+    return [self persistenceFilePath:@"uploadSize"];
+}
+
+- (NSString *)uploadIntervalFilePath {
+    return [self persistenceFilePath:@"uploadInterval"];
 }
 
 - (NSString *)identifyIdFilePath {
@@ -554,32 +572,21 @@ static dispatch_queue_t networkQueue;
 - (void)applicationWillEnterForeground:(NSNotification *)notification {
     TDLogDebug(@"%@ application will enter foreground", self);
     
-    if (@available(iOS 13.0, *)) {
-        if (_isEnableSceneSupport && _firstEnterForeground) {
-            _firstEnterForeground = NO;
-            return;
-        } else {
-            [self applicationWillEnterForeground];
-        }
-    } else {
-        [self applicationWillEnterForeground];
+    if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
+        _relaunchInBackGround = NO;
+        _appRelaunched = YES;
+        dispatch_async(serialQueue, ^{
+            if (self.taskId != UIBackgroundTaskInvalid) {
+                [[ThinkingAnalyticsSDK sharedUIApplication] endBackgroundTask:self.taskId];
+                self.taskId = UIBackgroundTaskInvalid;
+            }
+        });
     }
-}
-
-- (void)applicationWillEnterForeground {
-    _relaunchInBackGround = NO;
-    _appRelaunched = YES;
-    dispatch_async(serialQueue, ^{
-        if (self.taskId != UIBackgroundTaskInvalid) {
-            [[ThinkingAnalyticsSDK sharedUIApplication] endBackgroundTask:self.taskId];
-            self.taskId = UIBackgroundTaskInvalid;
-        }
-    });
 }
 
 - (void)applicationDidEnterBackground:(NSNotification *)notification {
     TDLogDebug(@"%@ application did enter background", self);
-    self.relaunchInBackGround = NO;
+    _relaunchInBackGround = NO;
     _applicationWillResignActive = NO;
     
     __block UIBackgroundTaskIdentifier backgroundTask = [[ThinkingAnalyticsSDK sharedUIApplication] beginBackgroundTaskWithExpirationHandler:^{
@@ -780,7 +787,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 - (void)track:(NSString *)event properties:(NSDictionary *)propertiesDict {
     if ([self hasDisabled])
         return;
-    BOOL isValid;
+    BOOL isValid = YES;
     propertiesDict = [self processParameters:propertiesDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -797,7 +804,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 - (void)track:(NSString *)event properties:(NSDictionary *)propertiesDict time:(NSDate *)time {
     if ([self hasDisabled])
         return;
-    BOOL isValid;
+    BOOL isValid = YES;
     propertiesDict = [self processParameters:propertiesDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -822,7 +829,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 #pragma clang diagnostic pop
         return;
     }
-    BOOL isValid;
+    BOOL isValid = YES;
     properties = [self processParameters:properties withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -846,7 +853,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 - (void)h5track:(NSString *)event properties:(NSDictionary *)propertieDict withType:(NSString *)type withTime:(NSString *)time {
     if ([self hasDisabled])
         return;
-    BOOL isValid;
+    BOOL isValid = YES;
     propertieDict = [self processParameters:propertieDict withType:type withEventName:event withAutoTrack:NO withH5:YES isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -868,7 +875,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 - (void)autotrack:(NSString *)event properties:(NSDictionary *)propertieDict withTime:(NSDate *)time {
     if ([self hasDisabled])
         return;
-    BOOL isValid;
+    BOOL isValid = YES;
     propertieDict = [self processParameters:propertieDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:YES withH5:NO isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -893,7 +900,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     if ([self hasDisabled])
         return;
     
-    BOOL isValid;
+    BOOL isValid = YES;
     properties = [self processParameters:properties withType:type withEventName:event withAutoTrack:NO withH5:NO isValid:&isValid];
     if (isValid) {
         TDEventData *eventData = [[TDEventData alloc] init];
@@ -955,6 +962,10 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 
 - (NSString *)getDistinctId {
     return [self.identifyId copy];
+}
+
++ (NSString *)getSDKVersion {
+    return [TDDeviceInfo libVersion];
 }
 
 - (NSString *)getDeviceId {
@@ -1130,43 +1141,54 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     }
     
     __block BOOL failed = NO;
+    NSMutableString *exceptionErrMsg = [[NSMutableString alloc] init];
+    [exceptionErrMsg appendString:@"[ThinkingSDKDebug] "];
     [properties enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
         if (![key isKindOfClass:[NSString class]]) {
-            NSString *errMsg = @"property Key should by NSString";
+            NSString *errMsg = [NSString stringWithFormat:@"property key must by NSString. got: %@. ", key];
             TDLogError(errMsg);
+            [exceptionErrMsg appendString:errMsg];
             failed = YES;
         }
         
         if (![self isValidName:key isAutoTrack:haveAutoTrackEvents]) {
-            NSString *errMsg = [NSString stringWithFormat:@"property name[%@] is not valid", key];
+            NSString *errMsg = [NSString stringWithFormat:@"property key is not valid. got: %@. ", key];
             TDLogError(errMsg);
+            [exceptionErrMsg appendString:errMsg];
             failed = YES;
         }
         
         if (![obj isKindOfClass:[NSString class]] &&
             ![obj isKindOfClass:[NSNumber class]] &&
             ![obj isKindOfClass:[NSDate class]]) {
-            NSString *errMsg = [NSString stringWithFormat:@"property values must be NSString, NSNumber, NSDate. got: %@ %@", [obj class], obj];
+            NSString *errMsg = [NSString stringWithFormat:@"property values must be NSString, NSNumber, NSDate. got: %@ %@. ", [obj class], obj];
             TDLogError(errMsg);
+            [exceptionErrMsg appendString:errMsg];
             failed = YES;
         }
         
         if (eventType.length > 0 && [eventType isEqualToString:TD_EVENT_TYPE_USER_ADD]) {
             if (![obj isKindOfClass:[NSNumber class]]) {
-                NSString *errMsg = [NSString stringWithFormat:@"user_add value must be NSNumber. got: %@ %@", [obj class], obj];
+                NSString *errMsg = [NSString stringWithFormat:@"user_add value must be NSNumber. got: %@ %@. ", [obj class], obj];
                 TDLogError(errMsg);
+                [exceptionErrMsg appendString:errMsg];
                 failed = YES;
             }
         }
         
         if ([obj isKindOfClass:[NSNumber class]]) {
             if ([obj doubleValue] > 9999999999999.999 || [obj doubleValue] < -9999999999999.999) {
-                TDLogError(@"number value is not valid.");
+                NSString *errMsg = [NSString stringWithFormat:@"property number value is not valid. got: %@. ", obj];
+                TDLogError(errMsg);
+                [exceptionErrMsg appendString:errMsg];
                 failed = YES;
             }
         }
     }];
     if (failed) {
+        if (self.config.allowDebug) {
+            [NSException raise:@"track data error" format:@"error reason: %@", exceptionErrMsg];
+        }
         return NO;
     }
     
@@ -1179,6 +1201,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     NSDictionary *eventDict = [NSJSONSerialization JSONObjectWithData:jsonData
                                                               options:NSJSONReadingMutableContainers
                                                                 error:&err];
+    NSString *appid = [eventDict[@"#app_id"] isKindOfClass:[NSString class]] ? eventDict[@"#app_id"] : self.appid;
     id dataArr = eventDict[@"data"];
     if (!err && [dataArr isKindOfClass:[NSArray class]]) {
         NSDictionary *dataInfo = [dataArr objectAtIndex:0];
@@ -1196,9 +1219,16 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
             [dic removeObjectForKey:@"#screen_height"];
             [dic removeObjectForKey:@"#screen_width"];
             
-            dispatch_async(serialQueue, ^{
-                [self h5track:event_name properties:dic withType:type withTime:time];
-            });
+            ThinkingAnalyticsSDK *instance = [ThinkingAnalyticsSDK sharedInstanceWithAppid:appid];
+            if (instance) {
+                dispatch_async(serialQueue, ^{
+                    [instance h5track:event_name properties:dic withType:type withTime:time];
+                });
+            } else {
+                dispatch_async(serialQueue, ^{
+                    [self h5track:event_name properties:dic withType:type withTime:time];
+                });
+            }
         }
     }
 }
@@ -1228,7 +1258,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         properties[@"#app_version"] = self.deviceInfo.appVersion;
         properties[@"#network_type"] = [[self class] getNetWorkStates];
         
-        if (self.relaunchInBackGround) {
+        if (_relaunchInBackGround) {
             properties[@"#relaunched_in_background"] = @YES;
         }
         if (eventData.timeValueType != TDTimeValueTypeTimeOnly) {
@@ -1279,10 +1309,26 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     }
     
     TDLogDebug(@"queueing data:%@", dataDic);
-    if (eventData.persist) {
+    if (self.config.debugMode == ThinkingAnalyticsDebugOnly || self.config.debugMode == ThinkingAnalyticsDebug) {
+        @synchronized (self) {
+            [self.debugEventsQueue addObject:dataDic];
+            if (self.debugEventsQueue.count > 5000) {
+                [self.debugEventsQueue removeObjectAtIndex:0];
+            }
+        }
+        
+        [self flushDebugEvent:nil];
+        NSInteger count;
+        @synchronized (instances) {
+            count = [self.dataQueue sqliteCountForAppid:self.appid];
+        }
+        if (count >= [self.config.uploadSize integerValue]) {
+            [self flush];
+        }
+    } else if (eventData.persist) {
         dispatch_async(serialQueue, ^{
             NSInteger count = [self saveEventsData:dataDic];
-            if (count >= self.config.uploadSize) {
+            if (count >= [self.config.uploadSize integerValue]) {
                 [self flush];
             }
         });
@@ -1295,7 +1341,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 
 - (void)flushImmediately:(NSDictionary *)dataDic {
     [self dispatchOnNetworkQueue:^{
-        [self.network flushEvents:@[dataDic] withAppid:self.appid];
+        [self.network flushEvents:@[dataDic]];
     }];
 }
 
@@ -1312,19 +1358,29 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         [properties addEntriesFromDictionary:propertiesDict];
     }
     
+    NSMutableString *exceptionErrMsg = [[NSMutableString alloc] init];
+    [exceptionErrMsg appendString:@"[ThinkingSDKDebug] "];
     if ([eventType isEqualToString:TD_EVENT_TYPE_TRACK] && !isH5) {
         if (![eventName isKindOfClass:[NSString class]] || eventName.length == 0) {
-            TDLogError(@"track event key is not valid");
+            NSString *errMsg = [NSString stringWithFormat:@"track event name is not valid. got: %@. ", eventName];
+            TDLogError(errMsg);
+            [exceptionErrMsg appendString:errMsg];
             *isValid = NO;
-            return nil;
         }
         
         if (![self isValidName:eventName isAutoTrack:NO]) {
             NSString *errMsg = [NSString stringWithFormat:@"property name[%@] is not valid", eventName];
             TDLogError(@"%@", errMsg);
+            [exceptionErrMsg appendString:errMsg];
             *isValid = NO;
-            return nil;
         }
+    }
+    
+    if (*isValid == NO) {
+        if (self.config.allowDebug) {
+            [NSException raise:@"track data error" format:@"error reason: %@", exceptionErrMsg];
+        }
+        return nil;
     }
     
     if (properties && !isH5 && ![self checkEventProperties:properties withEventType:eventType haveAutoTrackEvents:autotrack]) {
@@ -1337,14 +1393,10 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         NSMutableDictionary<NSString *, id> *propertiesDic = [NSMutableDictionary dictionaryWithDictionary:properties];
         
         for (NSString *key in [properties keyEnumerator]) {
-            if ([properties[key] isKindOfClass:[NSString class]]) {
+            if ([properties[key] isKindOfClass:[NSString class]] && [key isEqualToString:TD_CRASH_REASON]) {
                 NSString *string = properties[key];
                 NSUInteger objLength = [((NSString *)string)lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-                NSUInteger valueMaxLength = TA_PROPERTY_LENGTH_LIMIT;
-                
-                if ([key isEqualToString:TD_CRASH_REASON]) {
-                    valueMaxLength = TA_PROPERTY_CRASH_LENGTH_LIMIT;
-                }
+                NSUInteger valueMaxLength = TA_PROPERTY_CRASH_LENGTH_LIMIT;
                 if (objLength > valueMaxLength) {
                     NSString *errMsg = [NSString stringWithFormat:@"The value is too long: %@", (NSString *)properties[key]];
                     TDLogDebug(errMsg);
@@ -1370,16 +1422,76 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     [self syncWithCompletion:nil];
 }
 
-- (void)syncWithCompletion:(void (^)(void))handler {
+- (void)degradeDebugMode {
+    self.config.debugMode = ThinkingAnalyticsDebugOff;
+    self.network.debugMode = ThinkingAnalyticsDebugOff;
+    NSMutableArray *queueCopying;
+    @synchronized (self) {
+        queueCopying = [self.debugEventsQueue mutableCopy];
+        self.debugEventsQueue = [NSMutableArray array];
+    }
+    if (queueCopying.count > 0) {
+        dispatch_async(serialQueue, ^{
+            [queueCopying enumerateObjectsUsingBlock:^(NSDictionary *eventDic, NSUInteger idx, BOOL * _Nonnull stop) {
+                 [self saveEventsData:eventDic];
+            }];
+        });
+    }
+}
+
+- (void)flushDebugEvent:(void (^)(void))handler {
     [self dispatchOnNetworkQueue:^{
-        [self _sync:NO];
+        [self _syncDebug];
         if (handler) {
             dispatch_async(dispatch_get_main_queue(), handler);
         }
     }];
 }
 
-- (void)_sync:(BOOL)vacuumAfterFlushing {
+- (void)syncWithCompletion:(void (^)(void))handler {
+    [self dispatchOnNetworkQueue:^{
+        [self _sync];
+        if (handler) {
+            dispatch_async(dispatch_get_main_queue(), handler);
+        }
+    }];
+}
+
+- (void)_syncDebug {
+    if (self.config.debugMode == ThinkingAnalyticsDebugOff) {
+        return;
+    }
+    NSMutableArray *queueCopying;
+    @synchronized (self) {
+        queueCopying = [self.debugEventsQueue mutableCopy];
+    }
+    int debugResult = 0;
+    while (queueCopying.count > 0) {
+        NSDictionary *record = [queueCopying firstObject];
+        debugResult = [self.network flushDebugEvents:record withAppid:self.appid];
+        if (self.config.debugMode == ThinkingAnalyticsDebug) {
+            if (debugResult == -1) {
+                // 服务器不允许Debug，做降级处理
+                [self degradeDebugMode];
+                break;
+            } else if (debugResult == -2) {
+                // 网络异常
+                dispatch_async(serialQueue, ^{
+                    [self saveEventsData:record];
+                });
+            }
+        }
+        if (debugResult == 0 || debugResult == 1 || debugResult == 2) {
+            self.config.allowDebug = YES;
+        }
+        [queueCopying removeObjectAtIndex:0];
+        @synchronized (self) {
+            [self.debugEventsQueue removeObjectAtIndex:0];
+        }
+    }
+}
+
+- (void)_sync {
     NSString *networkType = [[self class] getNetWorkStates];
     if (!([self convertNetworkType:networkType] & self.config.networkTypePolicy)) {
         return;
@@ -1394,7 +1506,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     BOOL flushSucc = YES;
     while (recordArray.count > 0 && flushSucc) {
         NSUInteger sendSize = recordArray.count;
-        flushSucc = [self.network flushEvents:recordArray withAppid:self.appid];
+        flushSucc = [self.network flushEvents:recordArray];
         if (flushSucc) {
             @synchronized (instances) {
                 BOOL ret = [self.dataQueue removeFirstRecords:sendSize withAppid:self.appid];
@@ -1416,20 +1528,11 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 }
 
 #pragma mark - Flush control
-+ (void)restartFlushTimer {
-    for (NSString *appid in instances) {
-        dispatch_async(serialQueue, ^{
-            ThinkingAnalyticsSDK *instance = [instances objectForKey:appid];
-            [instance startFlushTimer];
-        });
-    }
-}
-
 - (void)startFlushTimer {
     [self stopFlushTimer];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.config.uploadInterval > 0) {
-            self.timer = [NSTimer scheduledTimerWithTimeInterval:self.config.uploadInterval
+            self.timer = [NSTimer scheduledTimerWithTimeInterval:[self.config.uploadInterval integerValue]
                                                           target:self
                                                         selector:@selector(flush)
                                                         userInfo:nil
@@ -1457,12 +1560,12 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         [self autotrack:TD_APP_INSTALL_EVENT properties:nil withTime:nil];
     }
     
-    if (!self.relaunchInBackGround && (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppEnd)) {
+    if (!_relaunchInBackGround && (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppEnd)) {
         [self timeEvent:TD_APP_END_EVENT];
     }
 
     if (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppStart) {
-        NSString *eventName = self.relaunchInBackGround?TD_APP_START_BACKGROUND_EVENT:TD_APP_START_EVENT;
+        NSString *eventName = _relaunchInBackGround?TD_APP_START_BACKGROUND_EVENT:TD_APP_START_EVENT;
         if (@available(iOS 13.0, *)) {
             if (_isEnableSceneSupport) {
                 eventName = TD_APP_START_EVENT;
@@ -1555,14 +1658,13 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     return YES;
 }
 
-
 #if THINKING_UIWEBVIEW_SUPPORT
 - (NSString *)webViewGetUserAgent {
     UIWebView *webView = [[UIWebView alloc] initWithFrame:CGRectZero];
     return [webView stringByEvaluatingJavaScriptFromString:@"navigator.userAgent"];
 }
 #else
-- (void)wkWebViewGetUserAgent: (void (^)(NSString *))completion {
+- (void)wkWebViewGetUserAgent:(void (^)(NSString *))completion {
     self.wkWebView = [[WKWebView alloc] initWithFrame:CGRectZero];
     [self.wkWebView evaluateJavaScript:@"navigator.userAgent" completionHandler:^(id __nullable userAgent, NSError * __nullable error) {
         completion(userAgent);
@@ -1584,7 +1686,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         }
     };
     
-    dispatch_block_t getUABlock = ^(){
+    dispatch_block_t getUABlock = ^() {
         #if THINKING_UIWEBVIEW_SUPPORT
         setUserAgent([self webViewGetUserAgent]);
         #else

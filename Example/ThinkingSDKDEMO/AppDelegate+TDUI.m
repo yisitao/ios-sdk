@@ -62,11 +62,11 @@
       }]];
     
     [commands addObject:
-     [APIEntry commandWithName:@"Track With Time"
+     [APIEntry commandWithName:@"Track With Timezone"
                  accessoryType:UITableViewCellAccessoryNone
                          block:^(UIViewController *controller)
       {
-          [ThinkingSDKAPI testTrackWithTime];
+          [ThinkingSDKAPI testTrackWithTimezone];
       }]];
     
     [commands addObject:
@@ -172,6 +172,14 @@
       {
           [ThinkingSDKAPI testIdentify];
       }]];
+    
+    [commands addObject:
+       [APIEntry commandWithName:@"Flush"
+                   accessoryType:UITableViewCellAccessoryNone
+                           block:^(UIViewController *controller)
+        {
+            [ThinkingSDKAPI testFlush];
+        }]];
     
     [commands addObject:
      [APIEntry commandWithName:@"Enable"

@@ -7,7 +7,7 @@
 
 #import "TDKeychainItemWrapper.h"
 
-#define VERSION @"2.2.2"
+#define VERSION @"2.3.0"
 
 @interface TDDeviceInfo ()
 
@@ -38,7 +38,7 @@
     return self;
 }
 
-- (NSString *)libVersion {
++ (NSString *)libVersion {
     return VERSION;
 }
 
@@ -61,7 +61,7 @@
     CGSize size = [UIScreen mainScreen].bounds.size;
     [p addEntriesFromDictionary:@{
                                   @"#lib": @"iOS",
-                                  @"#lib_version": [self libVersion],
+                                  @"#lib_version": [TDDeviceInfo libVersion],
                                   @"#manufacturer": @"Apple",
                                   @"#device_model": [self iphoneType],
                                   @"#os": [device systemName],
