@@ -83,6 +83,7 @@
         NSDictionary *properties = dataDic[@"properties"];
         
         XCTAssertNotNil(date);
+        XCTAssertNotNil(timeStr);
         XCTAssertNotNil(dataDic);
         XCTAssertNotNil(dataDic[@"#uuid"]);
         XCTAssertEqualObjects(dataDic[@"#event_name"], @"test");
@@ -578,6 +579,91 @@
     
     [self.mockThinkingInstance stopMocking];
     self.mockThinkingInstance = nil;
+}
+
+- (void)test20TimeZoneOffset {
+    __block int index = 0;
+    NSDate *date = [NSDate date];
+    NSTimeZone *timezone = [NSTimeZone timeZoneWithName:@"America/Chicago"];
+    void (^saveEventsDataInvocation)(NSInvocation *) = ^(NSInvocation *invocation) {
+        __weak NSDictionary *dataDic;
+        [invocation getArgument:&dataDic atIndex:2];
+        if (index == 0) {
+            NSTimeZone *tz = [NSTimeZone localTimeZone];
+            NSInteger sourceGMTOffset = [tz secondsFromGMTForDate:[NSDate date]];
+            XCTAssertTrue([[[dataDic objectForKey:@"properties"] objectForKey:@"#zone_offset"] intValue] == (int)sourceGMTOffset/3600);
+        } else if (index == 1) {
+            NSInteger sourceGMTOffset = [timezone secondsFromGMTForDate:[NSDate date]];
+            XCTAssertTrue([[[dataDic objectForKey:@"properties"] objectForKey:@"#zone_offset"] intValue] == (int)sourceGMTOffset/3600);
+            NSDateFormatter *timeFormatter = [[NSDateFormatter alloc] init];
+            timeFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+            timeFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+            timeFormatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+            timeFormatter.timeZone = timezone;
+            XCTAssertEqualObjects([dataDic objectForKey:@"#time"], [timeFormatter stringFromDate:date]);
+        }
+        index++;
+    };
+    OCMStub([_mockThinkingInstance saveEventsData:[OCMArg any]]).andDo(saveEventsDataInvocation);
+    [_mockThinkingInstance track:@"test"];
+    [_mockThinkingInstance track:@"test" properties:nil time:date timeZone:timezone];
+    [self waitForThinkingQueues];
+}
+
+- (void)test21User {
+    __block int index = 0;
+    NSDate *date = [NSDate date];
+    NSArray *arr1 = @[@"4", @"3"];
+    NSArray *arr2 = @[@"44", @"33"];
+    void (^saveEventsDataInvocation)(NSInvocation *) = ^(NSInvocation *invocation) {
+        __weak NSDictionary *dataDic;
+        [invocation getArgument:&dataDic atIndex:2];
+
+        NSString *timeStr = dataDic[@"#time"];
+        NSDateFormatter *timeFormatter = [[NSDateFormatter alloc]init];
+        timeFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+        NSDate *date = [timeFormatter dateFromString:timeStr];
+        NSDictionary *properties = dataDic[@"properties"];
+
+        XCTAssertNotNil(date);
+        XCTAssertNotNil(timeStr);
+        XCTAssertNotNil(dataDic);
+        XCTAssertNotNil(dataDic[@"#uuid"]);
+        if (index == 0) {
+            XCTAssertTrue([[properties allKeys] count] == 1);
+            XCTAssertEqualObjects(dataDic[@"#type"], @"user_add");
+            XCTAssertTrue([properties[@"key1"] intValue] == 6);
+        } else if (index == 1) {
+            XCTAssertTrue([[properties allKeys] count] == 3);
+            XCTAssertEqualObjects(dataDic[@"#type"], @"user_set");
+            XCTAssertEqualObjects(properties[@"UserName"], @"UserName");
+            NSDateFormatter *timeFormatter = [[NSDateFormatter alloc] init];
+            timeFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+            timeFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+            timeFormatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+            XCTAssertEqualObjects([dataDic objectForKey:@"#time"], [timeFormatter stringFromDate:date]);
+        } else if (index == 2) {
+            XCTAssertTrue([[properties allKeys] count] == 1);
+            XCTAssertEqualObjects(dataDic[@"#type"], @"user_setOnce");
+        } else if (index == 3) {
+            XCTAssertTrue([[properties allKeys] count] == 0);
+            XCTAssertEqualObjects(dataDic[@"#type"], @"user_del");
+        } else if (index == 4) {
+            XCTAssertTrue([[properties allKeys] count] == 2);
+            XCTAssertEqualObjects(dataDic[@"#type"], @"user_append");
+            XCTAssertEqualObjects([properties objectForKey:@"arrKey"], arr1);
+            XCTAssertEqualObjects([properties objectForKey:@"arrKey2"], arr2);
+        }
+
+        index ++;
+    };
+    OCMStub([_mockThinkingInstance saveEventsData:[OCMArg any]]).andDo(saveEventsDataInvocation);
+    [_mockThinkingInstance user_add:@{@"key1":[NSNumber numberWithInt:6]}];
+    [_mockThinkingInstance user_set:@{@"UserName":@"UserName", @"Age":[NSNumber numberWithInt:20], @"date":date}];
+    [_mockThinkingInstance user_setOnce:@{@"setOnce":@"setonevalue1"}];
+    [_mockThinkingInstance user_delete];
+    [_mockThinkingInstance user_append:@{@"arrKey": arr1, @"arrKey2": arr2}];
+    [self waitForThinkingQueues];
 }
 
 @end

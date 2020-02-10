@@ -114,6 +114,13 @@ static void TDSignalHandler(int signalNumber, struct __siginfo *info, void *cont
             crashStr = [NSString stringWithFormat:@"%@ %@", [exception reason], [NSThread callStackSymbols]];
         }
         crashStr = [crashStr stringByReplacingOccurrencesOfString:@"\n" withString:@"<br>"];
+
+        NSUInteger strLength = [((NSString *)crashStr) lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        NSUInteger strMaxLength = TA_PROPERTY_CRASH_LENGTH_LIMIT;
+        if (strLength > strMaxLength) {
+            crashStr = [NSMutableString stringWithString:[self limitString:crashStr withLength:strMaxLength - 1]];
+        }
+
         [properties setValue:crashStr forKey:TD_CRASH_REASON];
 
         NSDate *trackDate = [NSDate date];
@@ -137,6 +144,27 @@ static void TDSignalHandler(int signalNumber, struct __siginfo *info, void *cont
     signal(SIGBUS, SIG_DFL);
 
     TDLogInfo(@"Encountered an uncaught exception.");
+}
+
+- (NSString *)limitString:(NSString *)originalString withLength:(NSInteger)length {
+    NSStringEncoding encoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingUTF8);
+    NSData *originalData = [originalString dataUsingEncoding:encoding];
+    NSData *subData = [originalData subdataWithRange:NSMakeRange(0, length)];
+    NSString *limitString = [[NSString alloc] initWithData:subData encoding:encoding];
+
+    NSInteger index = 1;
+    while (index <= 3 && !limitString) {
+        if (length > index) {
+            subData = [originalData subdataWithRange:NSMakeRange(0, length - index)];
+            limitString = [[NSString alloc] initWithData:subData encoding:encoding];
+        }
+        index ++;
+    }
+
+    if (!limitString) {
+        return originalString;
+    }
+    return limitString;
 }
 
 - (void)addThinkingInstance:(ThinkingAnalyticsSDK *)instance {
