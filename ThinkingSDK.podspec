@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'ThinkingSDK'
-  s.version          = '2.4.2'
+  s.version          = '2.4.3'
   s.summary          = 'Official ThinkingData SDK for iOS.'
 
   s.homepage         = 'https://github.com/ThinkingDataAnalytics/ios-sdk'
@@ -20,10 +20,4 @@ Pod::Spec.new do |s|
      core.public_header_files = 'ThinkingSDK/Source/ThinkingAnalyticsSDK.h', 'ThinkingSDK/Source/ThinkingSDK.h'
      core.resources           = ['ThinkingSDK/TDAnalyticsSDK.bundle']
   end
-  
-  s.subspec 'UIWEBVIEW_SUPPORT' do |webview|
-     webview.dependency 'ThinkingSDK/Core'
-     webview.pod_target_xcconfig = { 'GCC_PREPROCESSOR_DEFINITIONS' => 'THINKING_UIWEBVIEW_SUPPORT=1'}
-  end
-  
 end
