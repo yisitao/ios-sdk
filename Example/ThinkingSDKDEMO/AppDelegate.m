@@ -22,7 +22,9 @@
     self.window.rootViewController = [self createRootViewController];
     [self.window makeKeyAndVisible];
     
-    // 开启Log
+    // 使用 NTP Server 校准时间
+//    [ThinkingAnalyticsSDK calibrateTimeWithNtp:@"ntp.aliyun.com"];
+    // 开启 Log
     [ThinkingAnalyticsSDK setLogLevel:TDLoggingLevelDebug];
     // 初始化
     [ThinkingAnalyticsSDK startWithAppId:@"YOUR_APPID" withUrl:@"YOUR_SERVER_URL"];
@@ -32,7 +34,8 @@
 //    config.trackRelaunchedInBackgroundEvents = YES;
 //    config.debugMode = ThinkingAnalyticsDebugOnly;
 //    config.debugMode = ThinkingAnalyticsDebug;
-//    [ThinkingAnalyticsSDK startWithAppId:@"APP" withUrl:@"https://sdk.tga.thinkinggame.cn:9443" withConfig:config];
+//    config.defaultTimeZone = [NSTimeZone timeZoneWithName:@"UTC+0900"];
+//    ThinkingAnalyticsSDK *instance = [ThinkingAnalyticsSDK startWithAppId:@"APP" withUrl:@"https://sdk.tga.thinkinggame.cn:9443" withConfig:config];
     
     // 自动埋点
 //    [[ThinkingAnalyticsSDK sharedInstance] enableAutoTrack:

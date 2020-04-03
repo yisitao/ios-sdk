@@ -96,12 +96,12 @@
 
 - (void)delExpiredData {
     NSTimeInterval oneDay = 24*60*60*1;
-    NSDate *date = [[NSDate date] initWithTimeIntervalSinceNow: -oneDay * [TDConfig expirationDays]];
+    NSDate *date = [[NSDate alloc] initWithTimeIntervalSinceNow: -oneDay * [TDConfig expirationDays]];
     int expirationDate = [date timeIntervalSince1970];
     [self removeOldRecords:expirationDate];
 }
 
-- (NSInteger)addObejct:(id)obj withAppid:(NSString *)appid {
+- (NSInteger)addObject:(id)obj withAppid:(NSString *)appid {
     NSUInteger maxCacheSize = [TDConfig maxNumEvents];
     if (_allmessageCount >= maxCacheSize) {
         [self removeFirstRecords:100 withAppid:nil];

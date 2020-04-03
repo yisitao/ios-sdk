@@ -53,6 +53,8 @@ dispatch_sync(dispatch_get_main_queue(), block);\
 }
 #endif
 
+#define kDefaultTimeFormat  @"yyyy-MM-dd HH:mm:ss.SSS"
+
 static NSUInteger const kBatchSize = 50;
 static NSUInteger const TA_PROPERTY_CRASH_LENGTH_LIMIT = 8191*2;
 static NSString * const TA_JS_TRACK_SCHEME = @"thinkinganalytics://trackEvent";
@@ -83,7 +85,6 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 @property (nonatomic, assign) SCNetworkReachabilityRef reachability;
 @property (nonatomic, strong) CTTelephonyNetworkInfo *telephonyInfo;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *(^dynamicSuperProperties)(void);
-@property (nonatomic, strong) NSMutableArray *debugEventsQueue;
 
 @property (atomic, strong) TDDeviceInfo *deviceInfo;
 @property (atomic, strong) TDSqliteDataQueue *dataQueue;
@@ -109,7 +110,6 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 - (void)archiveUploadSize:(NSNumber *)uploadSize;
 - (void)archiveUploadInterval:(NSNumber *)uploadInterval;
 - (void)startFlushTimer;
-- (void)degradeDebugMode;
 
 @end
 
