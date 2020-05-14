@@ -1345,6 +1345,11 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         dataDic[@"#account_id"] = self.accountId;
     }
     
+    if ([self.config.disableEvents containsObject:eventData.eventName]) {
+        TDLogDebug(@"disabled data:%@", dataDic);
+        return;
+    }
+    
     if (eventData.persist) {
         dispatch_async(serialQueue, ^{
             NSDictionary *finalDic = dataDic;
@@ -1572,7 +1577,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         [self autotrack:TD_APP_INSTALL_EVENT properties:nil withTime:nil];
     }
     
-    if (!_relaunchInBackGround && (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppEnd)) {
+    if (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppEnd) {
         [self timeEvent:TD_APP_END_EVENT];
     }
 
