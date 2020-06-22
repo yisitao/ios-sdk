@@ -198,10 +198,7 @@ static dispatch_queue_t networkQueue;
         
         instances[appid] = self;
         
-        if(instances.count == 1) {
-            TDLogInfo(@"Thank you very much for using Thinking Data SDK. We will do our best to provide you with the best service.");
-            TDLogInfo(@"Thinking Data SDK version:%@, DeviceId:%@", [TDDeviceInfo libVersion], [self getDeviceId]);
-        }
+        TDLogInfo(@"Thinking Analytics SDK %@ instance initialized successfully with mode: %@, APP ID: %@, server url: %@, device ID: %@", [TDDeviceInfo libVersion], [self modeEnumToString:config.debugMode], appid, serverURL, [self getDeviceId]);
     }
     return self;
 }
@@ -241,6 +238,10 @@ static dispatch_queue_t networkQueue;
 
 - (void)optOutTracking {
     TDLogDebug(@"%@ optOutTracking...", self);
+    [self doOptOutTracking];
+}
+
+- (void)doOptOutTracking {
     self.isOptOut = YES;
     
     @synchronized (self.trackTimer) {
@@ -277,7 +278,7 @@ static dispatch_queue_t networkQueue;
     eventData.eventType = TD_EVENT_TYPE_USER_DEL;
     eventData.persist = NO;
     [self tdInternalTrack:eventData];
-    [self optOutTracking];
+    [self doOptOutTracking];
 }
 
 - (void)optInTracking {
@@ -565,10 +566,6 @@ static dispatch_queue_t networkQueue;
                              object:nil];
 }
 
-- (void)applicationWillTerminateNotification:(NSNotification *)notification {
-    TDLogDebug(@"%@ applicationWillTerminateNotification", self);
-}
-
 - (void)applicationWillEnterForeground:(NSNotification *)notification {
     TDLogDebug(@"%@ application will enter foreground", self);
     
@@ -714,8 +711,6 @@ static dispatch_queue_t networkQueue;
         return ThinkingNetworkType3G;
     } else if ([@"4G" isEqualToString:networkType]) {
         return ThinkingNetworkType4G;
-    } else if ([@"UNKNOWN" isEqualToString:networkType]) {
-        return ThinkingNetworkType4G;
     }
     return ThinkingNetworkTypeNONE;
 }
@@ -757,8 +752,6 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         newtworkType = @"2G";
     } else if ([currentRadioAccessTechnology isEqualToString:CTRadioAccessTechnologyGPRS]) {
         newtworkType = @"2G";
-    } else if (currentRadioAccessTechnology) {
-        newtworkType = @"UNKNOWN";
     }
     return newtworkType;
 }
@@ -1479,6 +1472,11 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
             dispatch_async(dispatch_get_main_queue(), handler);
         }
     }];
+}
+
+- (NSString*)modeEnumToString:(ThinkingAnalyticsDebugMode)enumVal {
+    NSArray *modeEnumArray = [[NSArray alloc] initWithObjects:kModeEnumArray];
+    return [modeEnumArray objectAtIndex:enumVal];
 }
 
 - (void)_syncDebug:(NSDictionary *)record {

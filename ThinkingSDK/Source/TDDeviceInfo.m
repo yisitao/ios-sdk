@@ -7,7 +7,7 @@
 
 #import "TDKeychainItemWrapper.h"
 
-#define VERSION @"2.5.2"
+#define VERSION @"2.5.3"
 
 @interface TDDeviceInfo ()
 
@@ -59,13 +59,15 @@
 
     [p setValue:carrier.carrierName forKey:@"#carrier"];
     CGSize size = [UIScreen mainScreen].bounds.size;
+    NSLocale *currentLocale = [NSLocale currentLocale];
     [p addEntriesFromDictionary:@{
                                   @"#lib": @"iOS",
                                   @"#lib_version": [TDDeviceInfo libVersion],
                                   @"#manufacturer": @"Apple",
                                   @"#device_model": [self iphoneType],
-                                  @"#os": [device systemName],
+                                  @"#os": @"iOS",
                                   @"#os_version": [device systemVersion],
+                                  @"#system_language": [currentLocale objectForKey:NSLocaleLanguageCode],
                                   @"#screen_height": @((NSInteger)size.height),
                                   @"#screen_width": @((NSInteger)size.width)
                                   }];

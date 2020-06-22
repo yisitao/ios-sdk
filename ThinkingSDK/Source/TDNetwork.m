@@ -85,7 +85,7 @@
         } else {
             debugResult = -2;
             NSString *urlResponse = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            TDLogError(@"%@", [NSString stringWithFormat:@"Debug %@ network failure with response '%@'.", self, urlResponse]);
+            TDLogError(@"%@", [NSString stringWithFormat:@"Debug %@ network failed with response '%@'.", self, urlResponse]);
         }
         dispatch_semaphore_signal(flushSem);
     };
@@ -125,7 +125,7 @@
         } else {
             flushSucc = NO;
             NSString *urlResponse = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            TDLogError(@"%@", [NSString stringWithFormat:@"%@ network failure with response '%@'.", self, urlResponse]);
+            TDLogError(@"%@", [NSString stringWithFormat:@"%@ network failed with response '%@'.", self, urlResponse]);
         }
 
         dispatch_semaphore_signal(flushSem);
@@ -160,23 +160,21 @@
     return request;
 }
 
-- (void)fetchFlushConfig:(NSString *)appid handler:(TDFlushConfigBlock)handler {
+- (void)fetchRemoteConfig:(NSString *)appid handler:(TDFlushConfigBlock)handler {
     void (^block)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error || ![response isKindOfClass:[NSHTTPURLResponse class]]) {
-            TDLogError(@"UpdateBatchSizeAndInterval network failure:%@", error);
+            TDLogError(@"Fetch remote config network failed:%@", error);
             return;
         }
         NSError *err;
         NSDictionary *ret = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:&err];
         if (err) {
-            TDLogError(@"Update batchSize interval json error:%@", err);
+            TDLogError(@"Fetch remote config json error:%@", err);
         } else if ([ret isKindOfClass:[NSDictionary class]] && [ret[@"code"] isEqualToNumber:[NSNumber numberWithInt:0]]) {
-            TDLogDebug(@"FlushConfig:%@", [ret objectForKey:@"data"]);
+            TDLogDebug(@"Fetch remote config for %@ : %@", appid, [ret objectForKey:@"data"]);
             handler([ret objectForKey:@"data"], error);
-        } else if ([[ret objectForKey:@"code"] isEqualToNumber:[NSNumber numberWithInt:-2]]) {
-            TDLogError(@"APPID is wrong.");
         } else {
-            TDLogError(@"Update batchSize interval failed");
+            TDLogError(@"Fetch remote config failed");
         }
     };
     NSString *urlStr = [NSString stringWithFormat:@"%@?appid=%@", self.serverURL, appid];
