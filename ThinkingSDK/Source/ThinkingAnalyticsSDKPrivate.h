@@ -13,6 +13,9 @@
 #import "TDDeviceInfo.h"
 #import "TDConfig.h"
 #import "TDSqliteDataQueue.h"
+#import "TDEventModel.h"
+
+NS_ASSUME_NONNULL_BEGIN
 
 static NSString * const TD_APP_START_EVENT                  = @"ta_app_start";
 static NSString * const TD_APP_START_BACKGROUND_EVENT       = @"ta_app_bg_start";
@@ -25,13 +28,14 @@ static NSString * const TD_APP_INSTALL_EVENT                = @"ta_app_install";
 static NSString * const TD_CRASH_REASON                     = @"#app_crashed_reason";
 static NSString * const TD_RESUME_FROM_BACKGROUND           = @"#resume_from_background";
 
-static NSString * const TD_EVENT_TYPE_TRACK                 = @"track";
-static NSString * const TD_EVENT_TYPE_USER_DEL              = @"user_del";
-static NSString * const TD_EVENT_TYPE_USER_ADD              = @"user_add";
-static NSString * const TD_EVENT_TYPE_USER_SET              = @"user_set";
-static NSString * const TD_EVENT_TYPE_USER_SETONCE          = @"user_setOnce";
-static NSString * const TD_EVENT_TYPE_USER_UNSET            = @"user_unset";
-static NSString * const TD_EVENT_TYPE_USER_APPEND           = @"user_append";
+static kEDEventTypeName const TD_EVENT_TYPE_TRACK           = @"track";
+
+static kEDEventTypeName const TD_EVENT_TYPE_USER_DEL        = @"user_del";
+static kEDEventTypeName const TD_EVENT_TYPE_USER_ADD        = @"user_add";
+static kEDEventTypeName const TD_EVENT_TYPE_USER_SET        = @"user_set";
+static kEDEventTypeName const TD_EVENT_TYPE_USER_SETONCE    = @"user_setOnce";
+static kEDEventTypeName const TD_EVENT_TYPE_USER_UNSET      = @"user_unset";
+static kEDEventTypeName const TD_EVENT_TYPE_USER_APPEND     = @"user_append";
 
 static NSString * const TD_EVENT_START                      = @"eventStart";
 static NSString * const TD_EVENT_DURATION                   = @"eventDuration";
@@ -59,12 +63,6 @@ static NSUInteger const kBatchSize = 50;
 static NSUInteger const TA_PROPERTY_CRASH_LENGTH_LIMIT = 8191*2;
 static NSString * const TA_JS_TRACK_SCHEME = @"thinkinganalytics://trackEvent";
 
-typedef NS_OPTIONS(NSInteger, TimeValueType) {
-    TDTimeValueTypeNone      = 0,
-    TDTimeValueTypeTimeOnly  = 1 << 0,
-    TDTimeValueTypeAll       = 1 << 1,
-};
-
 #define kModeEnumArray @"NORMAL", @"DebugOnly", @"Debug", nil
 
 @interface ThinkingAnalyticsSDK ()
@@ -88,7 +86,6 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 @property (nonatomic, strong) CTTelephonyNetworkInfo *telephonyInfo;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *(^dynamicSuperProperties)(void);
 
-@property (atomic, strong) TDDeviceInfo *deviceInfo;
 @property (atomic, strong) TDSqliteDataQueue *dataQueue;
 @property (nonatomic, copy) TDConfig *config;
 @property (nonatomic, strong) NSDateFormatter *timeFormatter;
@@ -108,6 +105,7 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 - (NSInteger)saveEventsData:(NSDictionary *)data;
 - (void)flushImmediately:(NSDictionary *)dataDic;
 - (BOOL)hasDisabled;
++ (BOOL)isTrackEvent:(NSString *)eventType;
 - (BOOL)checkEventProperties:(NSDictionary *)properties withEventType:(NSString *)eventType haveAutoTrackEvents:(BOOL)haveAutoTrackEvents;
 - (void)archiveUploadSize:(NSNumber *)uploadSize;
 - (void)archiveUploadInterval:(NSNumber *)uploadInterval;
@@ -115,16 +113,17 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 
 @end
 
-@interface TDEventData : NSObject
+@interface TDEventModel ()
 
-@property (nonatomic, copy) NSString *eventName;
-@property (nonatomic, copy) NSString *eventType;
 @property (nonatomic, copy) NSString *timeString;
-@property (nonatomic, assign) BOOL autotrack;
-@property (nonatomic, assign) BOOL persist;
 @property (nonatomic, assign) double zoneOffset;
 @property (nonatomic, assign) TimeValueType timeValueType;
-@property (nonatomic, strong) NSDictionary *properties;
+@property (nonatomic, copy) NSString *extraID;
+@property (nonatomic, assign) BOOL persist;
+
+- (instancetype)initWithEventName:(NSString * _Nullable)eventName;
+
+- (instancetype _Nonnull )initWithEventName:(NSString * _Nullable)eventName eventType:(kEDEventTypeName _Nonnull )eventType;
 
 @end
 
@@ -133,3 +132,5 @@ typedef NS_OPTIONS(NSInteger, TimeValueType) {
 - (instancetype)initWithAPPID:(NSString *)appID withServerURL:(NSString *)serverURL withConfig:(TDConfig *)config;
 
 @end
+
+NS_ASSUME_NONNULL_END

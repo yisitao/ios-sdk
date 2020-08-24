@@ -36,6 +36,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)optInTracking;
 + (void)testFlush;
 
++ (void)testTrackWithDefaultFirstCheckID;
++ (void)testTrackWithFirstCheckID;
++ (void)testTrackUpdate;
++ (void)testTrackOverwrite;
+
++ (void)testChangeLibNameAndLibVersion;
+
 @end
 
 NS_ASSUME_NONNULL_END

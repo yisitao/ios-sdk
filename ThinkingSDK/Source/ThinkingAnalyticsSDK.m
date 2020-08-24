@@ -91,7 +91,6 @@ static dispatch_queue_t networkQueue;
         _appid = appid;
         _isEnabled = YES;
         _config = [config copy];
-        self.deviceInfo = [TDDeviceInfo sharedManager];
         
         self.trackTimer = [NSMutableDictionary dictionary];
         _timeFormatter = [[NSDateFormatter alloc] init];
@@ -117,7 +116,6 @@ static dispatch_queue_t networkQueue;
         if (config.debugMode == ThinkingAnalyticsDebugOnly || config.debugMode == ThinkingAnalyticsDebug) {
             _network.serverDebugURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/data_debug", serverURL]];
         }
-        _network.automaticData = _deviceInfo.automaticData;
         _network.securityPolicy = config.securityPolicy;
     }
     return self;
@@ -136,7 +134,6 @@ static dispatch_queue_t networkQueue;
         _config.appid = appid;
         _config.configureURL = [NSString stringWithFormat:@"%@/config",serverURL];
         
-        self.deviceInfo = [TDDeviceInfo sharedManager];
         [self retrievePersistedData];
         [_config updateConfig];
         
@@ -176,11 +173,11 @@ static dispatch_queue_t networkQueue;
             _network.serverDebugURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/data_debug",serverURL]];
         }
         _network.serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/sync",serverURL]];
-        _network.automaticData = _deviceInfo.automaticData;
         _network.securityPolicy = config.securityPolicy;
         
         [self sceneSupportSetting];
         
+#ifdef __IPHONE_13_0
         if (@available(iOS 13.0, *)) {
             if (!_isEnableSceneSupport) {
                 [self launchedIntoBackground];
@@ -189,9 +186,10 @@ static dispatch_queue_t networkQueue;
             } else {
                 _relaunchInBackGround = NO;
             }
-        } else {
-            [self launchedIntoBackground];
         }
+#else
+        [self launchedIntoBackground];
+#endif
         
         [self startFlushTimer];
         [self setApplicationListeners];
@@ -253,7 +251,7 @@ static dispatch_queue_t networkQueue;
     }
     
     @synchronized (self.identifyId) {
-        self.identifyId = self.deviceInfo.uniqueId;
+        self.identifyId = [TDDeviceInfo sharedManager].uniqueId;
     }
     
     @synchronized (self.accountId) {
@@ -274,8 +272,7 @@ static dispatch_queue_t networkQueue;
 
 - (void)optOutTrackingAndDeleteUser {
     TDLogDebug(@"%@ optOutTrackingAndDeleteUser...", self);
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventType = TD_EVENT_TYPE_USER_DEL;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:nil eventType:TD_EVENT_TYPE_USER_DEL];
     eventData.persist = NO;
     [self tdInternalTrack:eventData];
     [self doOptOutTracking];
@@ -290,7 +287,7 @@ static dispatch_queue_t networkQueue;
 #pragma mark - LightInstance
 - (ThinkingAnalyticsSDK *)createLightInstance {
     ThinkingAnalyticsSDK *lightInstance = [[LightThinkingAnalyticsSDK alloc] initWithAPPID:self.appid withServerURL:self.serverURL withConfig:self.config];
-    lightInstance.identifyId = self.deviceInfo.uniqueId;
+    lightInstance.identifyId = [TDDeviceInfo sharedManager].uniqueId;
     lightInstance.relaunchInBackGround = self.relaunchInBackGround;
     lightInstance.isEnableSceneSupport = self.isEnableSceneSupport;
     return lightInstance;
@@ -307,7 +304,7 @@ static dispatch_queue_t networkQueue;
     [self unarchiveUploadInterval];
     
     if (self.identifyId.length == 0) {
-        self.identifyId = self.deviceInfo.uniqueId;
+        self.identifyId = [TDDeviceInfo sharedManager].uniqueId;
     }
     
     // 兼容老版本
@@ -765,7 +762,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     });
 }
 
-#pragma mark - Tracking
+#pragma mark - Public
+
 - (void)track:(NSString *)event {
     if ([self hasDisabled])
         return;
@@ -776,12 +774,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     if ([self hasDisabled])
         return;
     propertiesDict = [self processParameters:propertiesDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:event];
     eventData.properties = [propertiesDict copy];
-    eventData.eventType = TD_EVENT_TYPE_TRACK;
-    eventData.autotrack = NO;
-    eventData.persist = YES;
     eventData.timeValueType = TDTimeValueTypeNone;
     [self tdInternalTrack:eventData];
 }
@@ -791,12 +785,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     if ([self hasDisabled])
         return;
     propertiesDict = [self processParameters:propertiesDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:event];
     eventData.properties = [propertiesDict copy];
-    eventData.eventType = TD_EVENT_TYPE_TRACK;
-    eventData.autotrack = NO;
-    eventData.persist = YES;
     eventData.timeString = [_timeFormatter stringFromDate:time];
     eventData.timeValueType = TDTimeValueTypeTimeOnly;
     [self tdInternalTrack:eventData];
@@ -813,12 +803,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         return;
     }
     properties = [self processParameters:properties withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:NO withH5:NO];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:event];
     eventData.properties = [properties copy];
-    eventData.eventType = TD_EVENT_TYPE_TRACK;
-    eventData.autotrack = NO;
-    eventData.persist = YES;
     NSDateFormatter *timeFormatter = [[NSDateFormatter alloc] init];
     timeFormatter.dateFormat = kDefaultTimeFormat;
     timeFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
@@ -830,15 +816,41 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     [self tdInternalTrack:eventData];
 }
 
-- (void)h5track:(NSString *)event properties:(NSDictionary *)propertieDict withType:(NSString *)type withTime:(NSString *)time {
+- (void)trackWithEventModel:(TDEventModel *)eventModel {
+    NSDictionary *dic = eventModel.properties;
+    eventModel.properties = [self processParameters:dic
+                                           withType:eventModel.eventType
+                                      withEventName:eventModel.eventName
+                                      withAutoTrack:NO
+                                             withH5:NO];
+    [self tdInternalTrack:eventModel];
+}
+
+#pragma mark - Private
+
+- (void)h5track:(NSString *)eventName
+        extraID:(NSString *)extraID
+     properties:(NSDictionary *)propertieDict
+           type:(NSString *)type
+           time:(NSString *)time {
+    
     if ([self hasDisabled])
         return;
-    propertieDict = [self processParameters:propertieDict withType:type withEventName:event withAutoTrack:NO withH5:YES];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    propertieDict = [self processParameters:propertieDict withType:type withEventName:eventName withAutoTrack:NO withH5:YES];
+    TDEventModel *eventData;
+    
+    if (extraID.length > 0) {
+        if ([type isEqualToString:TD_EVENT_TYPE_TRACK]) {
+            eventData = [[TDEventModel alloc] initWithEventName:eventName eventType:TD_EVENT_TYPE_TRACK_FIRST];
+        } else {
+            eventData = [[TDEventModel alloc] initWithEventName:eventName eventType:type];
+        }
+        eventData.extraID = extraID;
+    } else {
+        eventData = [[TDEventModel alloc] initWithEventName:eventName];
+    }
     eventData.properties = [propertieDict copy];
-    eventData.eventType = type;
-    eventData.persist = YES;
+
     if ([propertieDict objectForKey:@"#zone_offset"]) {
         eventData.zoneOffset = [[propertieDict objectForKey:@"#zone_offset"] doubleValue];
         eventData.timeValueType = TDTimeValueTypeAll;
@@ -853,12 +865,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     if ([self hasDisabled])
         return;
     propertieDict = [self processParameters:propertieDict withType:TD_EVENT_TYPE_TRACK withEventName:event withAutoTrack:YES withH5:NO];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:event];
     eventData.properties = [propertieDict copy];
-    eventData.eventType = TD_EVENT_TYPE_TRACK;
-    eventData.autotrack = YES;
-    eventData.persist = YES;
     eventData.timeString = [_timeFormatter stringFromDate:time];
     eventData.timeValueType = TDTimeValueTypeNone;
     [self tdInternalTrack:eventData];
@@ -870,23 +878,17 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     return (double)sourceGMTOffset/3600;
 }
 
-// 内部
 - (void)track:(NSString *)event withProperties:(NSDictionary *)properties withType:(NSString *)type {
     [self track:event withProperties:properties withType:type withTime:nil];
 }
 
-// 内部
 - (void)track:(NSString *)event withProperties:(NSDictionary *)properties withType:(NSString *)type withTime:(NSDate *)time {
     if ([self hasDisabled])
         return;
     
     properties = [self processParameters:properties withType:type withEventName:event withAutoTrack:NO withH5:NO];
-    TDEventData *eventData = [[TDEventData alloc] init];
-    eventData.eventName = event;
+    TDEventModel *eventData = [[TDEventModel alloc] initWithEventName:event eventType:type];
     eventData.properties = [properties copy];
-    eventData.eventType = type;
-    eventData.autotrack = NO;
-    eventData.persist = YES;
     if (time) {
         eventData.timeString = [_timeFormatter stringFromDate:time];
         eventData.timeValueType = TDTimeValueTypeTimeOnly;
@@ -896,80 +898,57 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     [self tdInternalTrack:eventData];
 }
 
++ (BOOL)isTrackEvent:(NSString *)eventType {
+    return [TD_EVENT_TYPE_TRACK isEqualToString:eventType]
+    || [TD_EVENT_TYPE_TRACK_FIRST isEqualToString:eventType]
+    || [TD_EVENT_TYPE_TRACK_UPDATE isEqualToString:eventType]
+    || [TD_EVENT_TYPE_TRACK_OVERWRITE isEqualToString:eventType]
+    ;
+}
+
+#pragma mark -
+
 - (void)user_add:(NSString *)propertyName andPropertyValue:(NSNumber *)propertyValue {
-    if ([self hasDisabled])
-        return;
-    
-    if (propertyName && propertyValue) {
-        [self track:nil withProperties:@{propertyName:propertyValue} withType:TD_EVENT_TYPE_USER_ADD];
-    }
+    [self user_add:propertyName andPropertyValue:propertyValue withTime:nil];
 }
 
 - (void)user_add:(NSString *)propertyName andPropertyValue:(NSNumber *)propertyValue withTime:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-    
     if (propertyName && propertyValue) {
         [self track:nil withProperties:@{propertyName:propertyValue} withType:TD_EVENT_TYPE_USER_ADD withTime:time];
     }
 }
 
 - (void)user_add:(NSDictionary *)properties {
-    if ([self hasDisabled])
-        return;
-    
-    [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_ADD];
+    [self user_add:properties withTime:nil];
 }
 
 - (void)user_add:(NSDictionary *)properties withTime:(NSDate *)time {
     if ([self hasDisabled])
         return;
-    
     [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_ADD withTime:time];
 }
 
 - (void)user_setOnce:(NSDictionary *)properties {
-    if ([self hasDisabled])
-        return;
-    
-    [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_SETONCE];
+    [self user_setOnce:properties withTime:nil];
 }
 
 - (void)user_setOnce:(NSDictionary *)properties withTime:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-    
     [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_SETONCE withTime:time];
 }
 
 - (void)user_set:(NSDictionary *)properties {
-    if ([self hasDisabled])
-        return;
-    
-    [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_SET];
+    [self user_set:properties withTime:nil];
 }
 
 - (void)user_set:(NSDictionary *)properties withTime:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-    
     [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_SET withTime:time];
 }
 
 - (void)user_unset:(NSString *)propertyName {
-    if ([self hasDisabled])
-        return;
-    
-    if ([propertyName isKindOfClass:[NSString class]] && propertyName.length > 0) {
-        NSDictionary *properties = @{propertyName: @0};
-        [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_UNSET];
-    }
+    [self user_unset:propertyName withTime:nil];
 }
 
 - (void)user_unset:(NSString *)propertyName withTime:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-    
     if ([propertyName isKindOfClass:[NSString class]] && propertyName.length > 0) {
         NSDictionary *properties = @{propertyName: @0};
         [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_UNSET withTime:time];
@@ -977,31 +956,29 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 }
 
 - (void)user_delete {
-    if ([self hasDisabled])
-        return;
-    
-    [self track:nil withProperties:nil withType:TD_EVENT_TYPE_USER_DEL];
+    [self user_delete:nil];
 }
 
 - (void)user_delete:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-    
     [self track:nil withProperties:nil withType:TD_EVENT_TYPE_USER_DEL withTime:time];
 }
 
 - (void)user_append:(NSDictionary<NSString *, NSArray *> *)properties {
-    if ([self hasDisabled])
-        return;
-
-    [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_APPEND];
+    [self user_append:properties withTime:nil];
 }
 
 - (void)user_append:(NSDictionary<NSString *, NSArray *> *)properties withTime:(NSDate *)time {
-    if ([self hasDisabled])
-        return;
-
     [self track:nil withProperties:properties withType:TD_EVENT_TYPE_USER_APPEND withTime:time];
+}
+
++ (void)setCustomerLibInfoWithLibName:(NSString *)libName libVersion:(NSString *)libVersion {
+    if (libName.length > 0) {
+        [TDDeviceInfo sharedManager].libName = libName;
+    }
+    if (libVersion.length > 0) {
+        [TDDeviceInfo sharedManager].libVersion = libVersion;
+    }
+    [[TDDeviceInfo sharedManager] updateAutomaticData];
 }
 
 - (NSString *)getDistinctId {
@@ -1009,11 +986,11 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 }
 
 + (NSString *)getSDKVersion {
-    return [TDDeviceInfo libVersion];
+    return VERSION;
 }
 
 - (NSString *)getDeviceId {
-    return _deviceInfo.deviceId;
+    return [TDDeviceInfo sharedManager].deviceId;
 }
 
 - (void)registerDynamicSuperProperties:(NSDictionary<NSString *, id> *(^)(void)) dynamicSuperProperties {
@@ -1232,6 +1209,15 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
             NSString *event_name = [dataInfo objectForKey:@"#event_name"];
             NSString *time = [dataInfo objectForKey:@"#time"];
             NSDictionary *properties = [dataInfo objectForKey:@"properties"];
+            
+            NSString *extraID;
+            
+            if ([type isEqualToString:TD_EVENT_TYPE_TRACK]) {
+                extraID = [dataInfo objectForKey:@"#first_check_id"];
+            } else {
+                extraID = [dataInfo objectForKey:@"#event_id"];
+            }
+            
             NSMutableDictionary *dic = [properties mutableCopy];
             [dic removeObjectForKey:@"#account_id"];
             [dic removeObjectForKey:@"#distinct_id"];
@@ -1244,18 +1230,26 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
             ThinkingAnalyticsSDK *instance = [ThinkingAnalyticsSDK sharedInstanceWithAppid:appid];
             if (instance) {
                 dispatch_async(serialQueue, ^{
-                    [instance h5track:event_name properties:dic withType:type withTime:time];
+                    [instance h5track:event_name
+                              extraID:extraID
+                           properties:dic
+                                 type:type
+                                 time:time];
                 });
             } else {
                 dispatch_async(serialQueue, ^{
-                    [self h5track:event_name properties:dic withType:type withTime:time];
+                    [self h5track:event_name
+                          extraID:extraID
+                       properties:dic
+                             type:type
+                             time:time];
                 });
             }
         }
     }
 }
 
-- (void)tdInternalTrack:(TDEventData *)eventData {
+- (void)tdInternalTrack:(TDEventModel *)eventData {
     if ([self hasDisabled])
         return;
     
@@ -1278,8 +1272,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         offset = eventData.zoneOffset;
     }
     
-    if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK]) {
-        properties[@"#app_version"] = self.deviceInfo.appVersion;
+    if ([ThinkingAnalyticsSDK isTrackEvent:eventData.eventType]) {
+        properties[@"#app_version"] = [TDDeviceInfo sharedManager].appVersion;
         properties[@"#network_type"] = [[self class] getNetWorkStates];
         
         if (_relaunchInBackGround) {
@@ -1317,19 +1311,35 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     
     NSMutableDictionary *dataDic = [NSMutableDictionary dictionary];
     dataDic[@"#time"] = timeString;
-    dataDic[@"#type"] = eventData.eventType;
     dataDic[@"#uuid"] = [[NSUUID UUID] UUIDString];
+    if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK_FIRST]) {
+        /** 首次事件的eventType也是track, 但是会有#first_check_id,
+         所以初始化的时候首次事件的eventType是 track_first, 用来判断是否需要extraID */
+        dataDic[@"#type"] = TD_EVENT_TYPE_TRACK;
+    } else {
+        dataDic[@"#type"] = eventData.eventType;
+    }
     
-    if (self.identifyId) {
+    if (self.identifyId.length > 0) {
         dataDic[@"#distinct_id"] = self.identifyId;
     }
     if (properties) {
         dataDic[@"properties"] = [NSDictionary dictionaryWithDictionary:properties];
     }
-    if (eventData.eventName) {
+    if (eventData.eventName.length > 0) {
         dataDic[@"#event_name"] = eventData.eventName;
     }
-    if (self.accountId) {
+    
+    if (eventData.extraID.length > 0) {
+        if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK_FIRST]) {
+            dataDic[@"#first_check_id"] = eventData.extraID;
+        } else if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK_UPDATE]
+                   || [eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK_OVERWRITE]) {
+            dataDic[@"#event_id"] = eventData.extraID;
+        }
+    }
+    
+    if (self.accountId.length > 0) {
         dataDic[@"#account_id"] = self.accountId;
     }
     
@@ -1365,7 +1375,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     }
 }
 
-- (NSDictionary *)calibratedTime:(NSDictionary *)dataDic withDate:(NSDate *)date withSystemDate:(NSTimeInterval)systemUptime withEventData:(TDEventData *)eventData {
+- (NSDictionary *)calibratedTime:(NSDictionary *)dataDic withDate:(NSDate *)date withSystemDate:(NSTimeInterval)systemUptime withEventData:(TDEventModel *)eventData {
     NSMutableDictionary *calibratedData = [NSMutableDictionary dictionaryWithDictionary:dataDic];
     NSTimeInterval outTime = systemUptime - calibratedTime.systemUptime;
     NSDate *serverDate = [NSDate dateWithTimeIntervalSince1970:(calibratedTime.serverTime + outTime)];
@@ -1379,7 +1389,8 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
     calibratedData[@"#time"] = timeString;
     NSMutableDictionary *properties = [NSMutableDictionary dictionaryWithDictionary:[calibratedData objectForKey:@"properties"]];
 
-    if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK] && eventData.timeValueType != TDTimeValueTypeTimeOnly) {
+    if ([eventData.eventType isEqualToString:TD_EVENT_TYPE_TRACK]
+        && eventData.timeValueType != TDTimeValueTypeTimeOnly) {
         properties[@"#zone_offset"] = @(offset);
     }
     calibratedData[@"properties"] = properties;
@@ -1393,8 +1404,11 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 }
 
 - (NSDictionary<NSString *,id> *)processParameters:(NSDictionary<NSString *,id> *)propertiesDict withType:(NSString *)eventType withEventName:(NSString *)eventName withAutoTrack:(BOOL)autotrack withH5:(BOOL)isH5 {
+    
+    BOOL isTrackEvent = [ThinkingAnalyticsSDK isTrackEvent:eventType];
+    
     NSMutableDictionary *properties = [NSMutableDictionary dictionary];
-    if ([eventType isEqualToString:TD_EVENT_TYPE_TRACK]) {
+    if (isTrackEvent) {
         [properties addEntriesFromDictionary:self.superProperty];
         NSDictionary *dynamicSuperPropertiesDict = self.dynamicSuperProperties?[self.dynamicSuperProperties() copy]:nil;
         if (dynamicSuperPropertiesDict && [dynamicSuperPropertiesDict isKindOfClass:[NSDictionary class]]) {
@@ -1409,7 +1423,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         }
     }
     
-    if ([eventType isEqualToString:TD_EVENT_TYPE_TRACK] && !isH5) {
+    if (isTrackEvent && !isH5) {
         if (![eventName isKindOfClass:[NSString class]] || eventName.length == 0) {
             NSString *errMsg = [NSString stringWithFormat:@"Event name is invalid. Event name must be NSString. got: %@ %@", [eventName class], eventName];
             TDLogError(errMsg);
@@ -1566,7 +1580,7 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
         return;
     
     _config.autoTrackEventType = eventType;
-    if (_deviceInfo.isFirstOpen && (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppInstall)) {
+    if ([TDDeviceInfo sharedManager].isFirstOpen && (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppInstall)) {
         [self autotrack:TD_APP_INSTALL_EVENT properties:nil withTime:nil];
     }
     
@@ -1576,11 +1590,13 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 
     if (_config.autoTrackEventType & ThinkingAnalyticsEventTypeAppStart) {
         NSString *eventName = _relaunchInBackGround?TD_APP_START_BACKGROUND_EVENT:TD_APP_START_EVENT;
+#ifdef __IPHONE_13_0
         if (@available(iOS 13.0, *)) {
             if (_isEnableSceneSupport) {
                 eventName = TD_APP_START_EVENT;
             }
         }
+#endif
         [self autotrack:eventName properties:@{TD_RESUME_FROM_BACKGROUND:@(_appRelaunched)} withTime:nil];
     }
     
@@ -1726,10 +1742,6 @@ static void ThinkingReachabilityCallback(SCNetworkReachabilityRef target, SCNetw
 - (NSString *)getTimeString:(NSDate *)date {
     return [_timeFormatter stringFromDate:date];
 }
-
-@end
-
-@implementation TDEventData
 
 @end
 

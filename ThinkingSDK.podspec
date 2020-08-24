@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'ThinkingSDK'
-  s.version          = '2.5.6'
+  s.version          = '2.6.0'
   s.summary          = 'Official ThinkingData SDK for iOS.'
 
   s.homepage         = 'https://github.com/ThinkingDataAnalytics/ios-sdk'
@@ -16,8 +16,8 @@ Pod::Spec.new do |s|
   s.default_subspec  = 'Core'
     
   s.subspec 'Core' do |core|
-     core.source_files        = 'ThinkingSDK/Source/*.{m,h}', 'ThinkingSDK/Source/autotrack/*.{m,h}', 'ThinkingSDK/Source/CalibratedTime/*.{c,m,h}'
-     core.public_header_files = 'ThinkingSDK/Source/ThinkingAnalyticsSDK.h', 'ThinkingSDK/Source/ThinkingSDK.h'
+     core.source_files        = 'ThinkingSDK/Source/*.{m,h}', 'ThinkingSDK/Source/autotrack/*.{m,h}', 'ThinkingSDK/Source/CalibratedTime/*.{c,m,h}', 'ThinkingSDK/Source/EventModel/*.{m,h}'
+     core.public_header_files = 'ThinkingSDK/Source/ThinkingAnalyticsSDK.h', 'ThinkingSDK/Source/ThinkingSDK.h', 'ThinkingSDK/Source/EventModel/TDEventModel.h', 'ThinkingSDK/Source/EventModel/TDFirstEventModel.h', 'ThinkingSDK/Source/EventModel/TDEditableEventModel.h'
      core.resources           = ['ThinkingSDK/TDAnalyticsSDK.bundle']
   end
 end
